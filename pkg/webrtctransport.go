@@ -34,6 +34,7 @@ type WebRTCTransport struct {
 	onICEConnectionStateChangeHandler func(webrtc.ICEConnectionState)
 	pendingSenders                    deque.Deque
 	negotiate                         func()
+	broadcastChannel                  *webrtc.DataChannel
 
 	subOnce   sync.Once
 	closeOnce sync.Once
@@ -55,13 +56,21 @@ func NewWebRTCTransport(session *Session, me MediaEngine, cfg WebRTCTransportCon
 	}
 
 	id := cuid.New()
+
+	broadcastChannel, err := pc.CreateDataChannel("broadcast", nil)
+	if err != nil {
+		log.Errorf("CreateDataChannel error: %v", err)
+		return nil, errDataChannelCreationFailed
+	}
+
 	p := &WebRTCTransport{
-		id:      id,
-		pc:      pc,
-		me:      me,
-		session: session,
-		router:  newRouter(pc, id, cfg.router),
-		senders: make(map[string][]Sender),
+		id:               id,
+		pc:               pc,
+		me:               me,
+		session:          session,
+		router:           newRouter(pc, id, cfg.router),
+		senders:          make(map[string][]Sender),
+		broadcastChannel: broadcastChannel,
 	}
 	p.pendingSenders.SetMinCapacity(2)
 
@@ -76,6 +85,27 @@ func NewWebRTCTransport(session *Session, me MediaEngine, cfg WebRTCTransportCon
 		if p.onTrackHandler != nil {
 			p.onTrackHandler(track, receiver)
 		}
+	})
+
+	broadcastChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
+		log.Debugf("New DataChannel message %s", string(msg.Data))
+		session.mu.RLock()
+		defer session.mu.RUnlock()
+		for tid, t := range session.transports {
+			// Don't send to self
+			if p.router.ID() == tid {
+				continue
+			}
+			log.Infof("Broadcast message to %s", tid)
+			if t, ok := t.(*WebRTCTransport); ok {
+				if t.broadcastChannel != nil {
+					t.broadcastChannel.Send(msg.Data)
+				}
+			}
+		}
+	})
+	broadcastChannel.OnOpen(func() {
+		broadcastChannel.Send([]byte("init"))
 	})
 
 	pc.OnDataChannel(func(d *webrtc.DataChannel) {

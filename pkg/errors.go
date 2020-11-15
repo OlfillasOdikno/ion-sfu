@@ -3,8 +3,9 @@ package sfu
 import "errors"
 
 var (
-	errPeerConnectionInitFailed = errors.New("pc init failed")
-	errPtNotSupported           = errors.New("payload type not supported")
+	errPeerConnectionInitFailed  = errors.New("pc init failed")
+	errDataChannelCreationFailed = errors.New("Datachannel creation failed")
+	errPtNotSupported            = errors.New("payload type not supported")
 	// router errors
 	errNoReceiverFound = errors.New("no receiver found")
 	// Helpers errors
